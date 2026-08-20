@@ -8,7 +8,6 @@ import time
 from typing import Optional
 
 from .config import Settings
-from .notifications import NotificationManager
 
 try:
     import pystray
@@ -31,12 +30,16 @@ def create_icon_image(color: str = "#00d4ff", size: int = 64) -> "Image.Image":
 class TrayApp:
     """System tray application for Windows Arena AI."""
 
-    def __init__(self, settings: Settings, notifications: NotificationManager, server_port: int):
+    def __init__(self, settings: Settings, notifications, server_port: int):
         self.settings = settings
-        self.notifications = notifications
+        self.notifications = notifications  # Can be None initially
         self.server_port = server_port
         self._icon: Optional["pystray.Icon"] = None
         self._thread: Optional[threading.Thread] = None
+
+    def set_notifications(self, notifications):
+        """Set the notification manager (called after server is created)."""
+        self.notifications = notifications
 
     def _open_web_ui(self, icon=None, item=None):
         webbrowser.open(f"http://localhost:{self.server_port}")
@@ -50,10 +53,12 @@ class TrayApp:
             self._icon.icon = create_icon_image(color)
 
     def _approve_all(self, icon=None, item=None):
-        self.notifications.approve_all()
+        if self.notifications:
+            self.notifications.approve_all()
 
     def _deny_all(self, icon=None, item=None):
-        self.notifications.deny_all()
+        if self.notifications:
+            self.notifications.deny_all()
 
     def _quit(self, icon=None, item=None):
         if self._icon:
@@ -63,7 +68,7 @@ class TrayApp:
         if not HAS_TRAY:
             return None
 
-        pending_count = len(self.notifications.get_pending())
+        pending_count = len(self.notifications.get_pending()) if self.notifications else 0
         unrestricted_label = "🔓 Unrestricted: ON" if self.settings.unrestricted_mode else "🔒 Unrestricted: OFF"
 
         menu = pystray.Menu(

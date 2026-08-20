@@ -1,7 +1,7 @@
 """
 Windows Arena AI — Notification & Approval System
 Shows Windows toast notifications when the agent requests access.
-Users can approve or deny actions from the system tray.
+Users can approve or deny actions from the system tray or web UI.
 """
 import threading
 import time
@@ -32,19 +32,22 @@ class ApprovalRequest:
         self.details = details
         self.timeout = timeout
         self.approved: Optional[bool] = None
-        self.event = threading.Event()
+        self._async_event = asyncio.Event()
         self.created_at = time.time()
 
     def approve(self):
         self.approved = True
-        self.event.set()
+        self._async_event.set()
 
     def deny(self):
         self.approved = False
-        self.event.set()
+        self._async_event.set()
 
-    def wait(self) -> bool:
-        self.event.wait(timeout=self.timeout)
+    async def wait(self) -> bool:
+        try:
+            await asyncio.wait_for(self._async_event.wait(), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            pass
         if self.approved is None:
             self.approved = False  # Auto-deny on timeout
         return self.approved
@@ -70,6 +73,12 @@ class NotificationManager:
             return f"🖥️ Execute command:\n{details.get('cmd', '?')}"
         elif action == "mouse_click":
             return f"🖱️ Click at ({details.get('x')}, {details.get('y')})"
+        elif action == "mouse_move":
+            return f"🖱️ Move mouse to ({details.get('x')}, {details.get('y')})"
+        elif action == "mouse_scroll":
+            return f"🖱️ Scroll ({details.get('clicks', '?')} clicks)"
+        elif action == "mouse_drag":
+            return f"🖱️ Drag from ({details.get('x1')},{details.get('y1')}) to ({details.get('x2')},{details.get('y2')})"
         elif action == "type_text":
             return f"⌨️ Type {details.get('text_length', '?')} characters"
         elif action == "type_unicode":
@@ -78,12 +87,6 @@ class NotificationManager:
             return f"⌨️ Press key: {details.get('key', '?')}"
         elif action == "hotkey":
             return f"⌨️ Hotkey: {'+'.join(details.get('keys', []))}"
-        elif action == "mouse_move":
-            return f"🖱️ Move mouse to ({details.get('x')}, {details.get('y')})"
-        elif action == "mouse_scroll":
-            return f"🖱️ Scroll ({details.get('clicks', '?')} clicks)"
-        elif action == "mouse_drag":
-            return f"🖱️ Drag from ({details.get('x1')},{details.get('y1')}) to ({details.get('x2')},{details.get('y2')})"
         elif action == "launch_program":
             return f"🚀 Launch: {details.get('path', '?')}"
         elif action == "kill_process":
@@ -114,23 +117,23 @@ class NotificationManager:
         message = self._format_action(action, details)
         self.logger.info(f"Approval requested [{req_id}]: {message}")
 
-        # Play alert sound
+        # Play alert sound (in thread to not block)
         if HAS_SOUND:
             try:
-                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                threading.Thread(target=lambda: winsound.MessageBeep(winsound.MB_ICONEXCLAMATION), daemon=True).start()
             except Exception:
                 pass
 
-        # Show Windows toast notification
+        # Show Windows toast notification (in thread to not block)
         if self._toaster:
             try:
-                self._toaster.show_toast(
+                threading.Thread(target=lambda: self._toaster.show_toast(
                     "Windows Arena AI — Approval Required",
                     f"{message}\n\nApprove via system tray or web UI.",
                     duration=min(self.settings.approval_timeout_sec, 30),
-                    threaded=True,
+                    threaded=False,
                     icon_path=None,
-                )
+                ), daemon=True).start()
             except Exception as e:
                 self.logger.warning(f"Toast notification failed: {e}")
 
@@ -146,8 +149,8 @@ class NotificationManager:
             except Exception as e:
                 self.logger.warning(f"GUI callback failed: {e}")
 
-        # Wait for approval
-        approved = req.wait()
+        # Wait for approval (non-blocking for asyncio)
+        approved = await req.wait()
 
         # Cleanup
         with self._lock:

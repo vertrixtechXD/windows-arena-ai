@@ -95,11 +95,14 @@ def main():
         tunnel=settings.tunnel_provider,
     ))
 
+    # Create server first so we can pass notifications to tray
+    server = ArenaServer(settings)
+
     # Start system tray
     tray = None
     if not args.no_tray:
         try:
-            tray = TrayApp(settings, None, settings.port)
+            tray = TrayApp(settings, server.notifications, settings.port)
             tray.start()
             print("  ✅ System tray icon active")
         except Exception as e:
@@ -109,8 +112,6 @@ def main():
     print(f"  🚀 Starting server on port {settings.port}...")
     print(f"  📖 Open http://localhost:{settings.port} for API docs")
     print(f"  ⏹️  Press Ctrl+C to stop\n")
-
-    server = ArenaServer(settings)
 
     try:
         asyncio.run(server.start())
