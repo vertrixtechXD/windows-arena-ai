@@ -9,6 +9,7 @@ import time
 import base64
 import os
 import sys
+import ctypes
 from pathlib import Path
 from typing import Optional
 
@@ -79,7 +80,23 @@ class ArenaServer:
         return key == self.settings.api_key
 
     def _json_response(self, data: dict, status: int = 200) -> web.Response:
-        return web.json_response(data, status=status, content_type="application/json")
+        # Custom encoder to handle ctypes and other non-serializable objects
+        def default_encoder(obj):
+            if isinstance(obj, (ctypes.c_long, ctypes.c_int, ctypes.c_ulong, ctypes.c_uint,
+                                ctypes.c_longlong, ctypes.c_ulonglong, ctypes.c_short,
+                                ctypes.c_ushort, ctypes.c_byte, ctypes.c_ubyte)):
+                return int(obj)
+            if isinstance(obj, (ctypes.c_float, ctypes.c_double)):
+                return float(obj)
+            if isinstance(obj, ctypes.POINTER(ctypes.c_int)):
+                return int(obj.contents)
+            if hasattr(obj, '_type_'):  # ctypes pointer
+                return int(obj)
+            if hasattr(obj, '__int__'):
+                return int(obj)
+            return str(obj)
+
+        return web.json_response(data, status=status, content_type="application/json", dumps=lambda o: json.dumps(o, default=default_encoder))
 
     def _unauthorized(self) -> web.Response:
         return self._json_response({"error": "Unauthorized"}, 401)
